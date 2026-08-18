@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Icon, iconTypeFor, dayIconType, COLORS } from "./icons.jsx";
+import { Icon, iconTypeFor, dayIconType, COLORS, groupColorFor, muscleGroupFor, withAlpha } from "./icons.jsx";
 import { uid, defaultDays } from "./defaultData.js";
 import Calendar, { groupHistoryByDate } from "./Calendar.jsx";
+import Timer from "./Timer.jsx";
+import { applyRotation, detachFromPool } from "./rotation.js";
+import { supabase, supabaseEnabled } from "./supabaseClient.js";
+import { useAuth } from "./Auth.jsx";
 
 const STORAGE_KEY = "plan-treningowy-state-v1";
 
@@ -10,10 +14,10 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return { days: parsed.days || defaultDays(), history: parsed.history || [], checked: parsed.checked || {} };
+      return { days: applyRotation(parsed.days || defaultDays()), history: parsed.history || [], checked: parsed.checked || {} };
     }
   } catch (e) {}
-  return { days: defaultDays(), history: [], checked: {} };
+  return { days: applyRotation(defaultDays()), history: [], checked: {} };
 }
 
 function computeStreak(history) {
@@ -31,12 +35,15 @@ function computeStreak(history) {
 }
 
 const ACTIVITY_TYPES = ["Bieganie", "Rower", "Rozciąganie", "Siłowo (poza planem)", "Inne"];
+const STRENGTH_GROUPS = ["push", "pull", "legs"];
 
 export default function App() {
+  const { session, signOut } = useAuth();
   const initial = useRef(loadState()).current;
   const [days, setDays] = useState(initial.days);
   const [history, setHistory] = useState(initial.history);
   const [checked, setChecked] = useState(initial.checked);
+  const [cloudReady, setCloudReady] = useState(!supabaseEnabled);
 
   const [openDay, setOpenDay] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -45,16 +52,42 @@ export default function App() {
   const [newEx, setNewEx] = useState({ name: "", sets: "3", reps: "10" });
   const [editingDayId, setEditingDayId] = useState(null);
   const [dayTitleDraft, setDayTitleDraft] = useState("");
-  const [showCaution, setShowCaution] = useState(true);
   const [logOpen, setLogOpen] = useState(false);
   const [logDraft, setLogDraft] = useState({ type: "Bieganie", duration: "30", note: "", date: new Date().toISOString().slice(0, 10) });
   const [historyView, setHistoryView] = useState("calendar");
   const [calMonth, setCalMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(null);
+  const [zoomedIcon, setZoomedIcon] = useState(null);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ days, history, checked })); } catch (e) {}
   }, [days, history, checked]);
+
+  useEffect(() => {
+    if (!supabaseEnabled || !session) return;
+    let cancelled = false;
+    setCloudReady(false);
+    (async () => {
+      const { data, error } = await supabase.from("plans").select("data").eq("user_id", session.user.id).maybeSingle();
+      if (cancelled) return;
+      if (error) { console.error("Nie udało się wczytać planu z chmury:", error.message); }
+      const cloud = data && data.data;
+      if (cloud && Object.keys(cloud).length) {
+        setDays(applyRotation(cloud.days || defaultDays()));
+        setHistory(cloud.history || []);
+        setChecked(cloud.checked || {});
+      }
+      setCloudReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!supabaseEnabled || !session || !cloudReady) return;
+    supabase.from("plans")
+      .upsert({ user_id: session.user.id, data: { days, history, checked }, updated_at: new Date().toISOString() })
+      .then(({ error }) => { if (error) console.error("Nie udało się zapisać planu w chmurze:", error.message); });
+  }, [days, history, checked, cloudReady, session]);
 
   const streak = computeStreak(history);
 
@@ -76,20 +109,25 @@ export default function App() {
   };
 
   const updateExercise = (dayId, exId, patch) => {
-    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: d.exercises.map((e) => e.id === exId ? { ...e, ...patch } : e) }));
+    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: d.exercises.map((e) => e.id === exId ? detachFromPool({ ...e, ...patch }) : e) }));
   };
   const deleteExercise = (dayId, exId) => {
     if (!confirm("Usunąć to ćwiczenie?")) return;
     setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: d.exercises.filter((e) => e.id !== exId) }));
   };
   const addExercise = (dayId) => {
-    if (!newEx.name.trim()) return;
-    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: [...d.exercises, { id: uid(), name: newEx.name.trim(), sets: Number(newEx.sets) || 1, reps: newEx.reps || "-", caution: false, note: "" }] }));
+    const name = newEx.name.trim();
+    if (!name) return;
+    const day = days.find((d) => d.id === dayId);
+    const dayGroup = muscleGroupFor(dayIconType(day.title));
+    const exGroup = muscleGroupFor(iconTypeFor(name));
+    if (STRENGTH_GROUPS.includes(dayGroup) && STRENGTH_GROUPS.includes(exGroup) && dayGroup !== exGroup) {
+      const ok = confirm(`To ćwiczenie wygląda jak trening innej partii niż "${day.title}". Dodać mimo to?`);
+      if (!ok) return;
+    }
+    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: [...d.exercises, { id: uid(), name, sets: Number(newEx.sets) || 1, reps: newEx.reps || "-", note: "" }] }));
     setNewEx({ name: "", sets: "3", reps: "10" });
     setAddingTo(null);
-  };
-  const toggleCaution = (dayId, exId) => {
-    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: d.exercises.map((e) => e.id === exId ? { ...e, caution: !e.caution } : e) }));
   };
   const saveDayTitle = (dayId) => {
     setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, title: dayTitleDraft.trim() || d.title }));
@@ -108,7 +146,7 @@ export default function App() {
   };
   const resetPlan = () => {
     if (!confirm("Przywrócić domyślny plan? Twoje zmiany w ćwiczeniach zostaną nadpisane (historia zostanie).")) return;
-    setDays(defaultDays());
+    setDays(applyRotation(defaultDays()));
     setChecked({});
   };
   const submitLog = () => {
@@ -136,18 +174,29 @@ export default function App() {
 
       {/* Header */}
       <div style={{ padding: "28px 20px 18px", borderBottom: "1px solid #2B3038" }}>
-        <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 700, fontSize: 26, letterSpacing: 1, textTransform: "uppercase" }}>
-          Plan <span style={{ color: COLORS.brass }}>5 / tydzień</span>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 700, fontSize: 26, letterSpacing: 1, textTransform: "uppercase" }}>
+              Napakowany <span style={{ color: COLORS.brass }}>Tata</span>
+            </div>
+            <div style={{ color: "#8A8E96", fontSize: 13, marginTop: 4 }}>Plan 5 / tydzień · drążek · gumy · rower · bieganie</div>
+          </div>
+          {supabaseEnabled && session && (
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: 11, color: "#8A8E96", marginBottom: 4, wordBreak: "break-all" }}>{session.user.email}</div>
+              <button onClick={signOut} style={{ background: "none", border: "1px solid #2B3038", borderRadius: 6, padding: "4px 10px", color: "#8A8E96", fontSize: 11, cursor: "pointer" }}>Wyloguj</button>
+            </div>
+          )}
         </div>
-        <div style={{ color: "#8A8E96", fontSize: 13, marginTop: 4 }}>Drążek · gumy · rower · bieganie — siła i sylwetka</div>
       </div>
 
-      {/* Log activity button */}
-      <div style={{ margin: "16px 20px 0" }}>
+      {/* Log activity + timer */}
+      <div style={{ margin: "16px 20px 0", display: "flex", gap: 8 }}>
         <button onClick={() => openLog()}
-          style={{ width: "100%", background: COLORS.brass, color: "#1A1500", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer" }}>
+          style={{ flex: 1, background: COLORS.brass, color: "#1A1500", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer" }}>
           + Zaloguj aktywność
         </button>
+        <Timer />
       </div>
 
       {/* Streak */}
@@ -161,39 +210,30 @@ export default function App() {
         </div>
       )}
 
-      {/* Caution banner */}
-      {showCaution && (
-        <div style={{ margin: "16px 20px 0", background: "#2A211A", border: "1px solid #8A7220", borderRadius: 10, padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <div style={{ color: COLORS.brass, fontSize: 16, lineHeight: 1 }}>⚠</div>
-          <div style={{ fontSize: 12.5, color: "#9A9EA6", lineHeight: 1.5, flex: 1 }}>
-            Ćwiczenia oznaczone <b style={{ color: COLORS.brass }}>⚠</b> mocniej angażują pachwinę/biodra — przy bólu przerwij i zamień na lżejszy wariant. Historia przepukliny to sygnał, żeby plan skonsultować z fizjoterapeutą, zwłaszcza przy zwiększaniu obciążeń.
-          </div>
-          <button onClick={() => setShowCaution(false)} style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 16 }}>✕</button>
-        </div>
-      )}
-
       {/* Days */}
       <div style={{ padding: "18px 20px 0", display: "flex", flexDirection: "column", gap: 12 }}>
         {days.map((day, idx) => {
           const isOpen = openDay === day.id;
           const doneN = (checked[day.id] || []).length;
           const total = day.exercises.length;
+          const groupColor = groupColorFor(dayIconType(day.title));
           return (
-            <div key={day.id} style={{ background: "#1D2025", border: "1px solid #2B3038", borderRadius: 14, overflow: "hidden" }}>
+            <div key={day.id} style={{ background: `linear-gradient(135deg, ${withAlpha(groupColor, 0.16)} 0%, #1D2025 55%)`, border: "1px solid #2B3038", borderLeft: `3px solid ${groupColor}`, borderRadius: 14, overflow: "hidden" }}>
               <div onClick={() => setOpenDay(isOpen ? null : day.id)} style={{ padding: 16, cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 13, color: COLORS.brass, width: 20, flexShrink: 0 }}>{String(idx + 1).padStart(2, "0")}</div>
-                <div style={{ width: 46, height: 46, borderRadius: 12, background: "#2B3038", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <Icon type={dayIconType(day.title)} color={COLORS.brass} size={26} />
+                <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 13, color: groupColor, width: 20, flexShrink: 0 }}>{String(idx + 1).padStart(2, "0")}</div>
+                <div style={{ width: 48, height: 48, borderRadius: 12, background: `linear-gradient(135deg, ${withAlpha(groupColor, 0.32)}, ${withAlpha(groupColor, 0.1)})`, border: `1px solid ${withAlpha(groupColor, 0.4)}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon type={dayIconType(day.title)} color={groupColor} size={26} />
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }} onClick={(e) => e.stopPropagation()}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   {editingDayId === day.id ? (
-                    <input autoFocus value={dayTitleDraft} onChange={(e) => setDayTitleDraft(e.target.value)}
+                    <input autoFocus onClick={(e) => e.stopPropagation()} value={dayTitleDraft} onChange={(e) => setDayTitleDraft(e.target.value)}
                       style={{ background: "#2B3038", border: "none", borderRadius: 6, padding: "4px 6px", color: "#EDEAE3", fontSize: 14, width: "100%" }} />
                   ) : (
                     <div style={{ fontWeight: 600, fontSize: 15 }}>{day.title}</div>
                   )}
-                  <div style={{ fontSize: 11.5, color: "#8A8E96", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    {day.tag} · {total} ćwiczeń {doneN > 0 ? `· ${doneN}/${total} zaznaczone` : ""}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: groupColor, textTransform: "uppercase", letterSpacing: 0.5, background: withAlpha(groupColor, 0.16), border: `1px solid ${withAlpha(groupColor, 0.35)}`, borderRadius: 4, padding: "2px 6px" }}>{day.tag}</span>
+                    <span style={{ fontSize: 11.5, color: "#8A8E96" }}>{total} ćwiczeń {doneN > 0 ? `· ${doneN}/${total} zaznaczone` : ""}</span>
                   </div>
                 </div>
                 {editingDayId === day.id ? (
@@ -210,6 +250,7 @@ export default function App() {
                   {day.exercises.map((ex) => {
                     const isEditing = editingId === ex.id;
                     const isDone = (checked[day.id] || []).includes(ex.id);
+                    const exColor = groupColorFor(iconTypeFor(ex.name));
                     return (
                       <div key={ex.id} style={{ borderTop: "1px solid #2B3038", padding: "12px 0", display: "flex", alignItems: "flex-start", gap: 10 }}>
                         <button onClick={() => toggleCheck(day.id, ex.id)}
@@ -217,9 +258,10 @@ export default function App() {
                           {isDone ? "✓" : ""}
                         </button>
                         {!isEditing && (
-                          <div style={{ width: 40, height: 40, borderRadius: 10, background: "#2B3038", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: isDone ? 0.45 : 1 }}>
-                            <Icon type={iconTypeFor(ex.name)} color={COLORS.chalk} size={22} />
-                          </div>
+                          <button onClick={() => setZoomedIcon({ name: ex.name, type: iconTypeFor(ex.name), color: exColor })}
+                            style={{ width: 46, height: 46, borderRadius: 10, background: withAlpha(exColor, isDone ? 0.08 : 0.18), border: `1px solid ${withAlpha(exColor, isDone ? 0.15 : 0.35)}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: isDone ? 0.45 : 1, cursor: "pointer", padding: 0 }}>
+                            <Icon type={iconTypeFor(ex.name)} color={exColor} size={28} />
+                          </button>
                         )}
                         {isEditing ? (
                           <div style={{ flex: 1, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -238,18 +280,15 @@ export default function App() {
                           <>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontSize: 13.5, color: isDone ? "#8A8E96" : "#EDEAE3", textDecoration: isDone ? "line-through" : "none" }}>
-                                {ex.name} {ex.caution && <span style={{ color: COLORS.brass }}>⚠</span>}
+                                {ex.name}
                               </div>
                               <div style={{ fontSize: 11.5, color: "#8A8E96", marginTop: 1 }}>{ex.sets} × {ex.reps}</div>
                               {ex.note && <div style={{ fontSize: 11, color: COLORS.brass, marginTop: 3, opacity: isDone ? 0.5 : 0.9 }}>{ex.note}</div>}
                             </div>
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                              <button onClick={() => toggleCaution(day.id, ex.id)} style={{ background: "none", border: "none", color: ex.caution ? COLORS.brass : "#2B3038", cursor: "pointer", fontSize: 14 }}>⚠</button>
-                              <div style={{ display: "flex", gap: 6 }}>
-                                <button onClick={() => { setEditingId(ex.id); setEditDraft({ name: ex.name, sets: ex.sets, reps: ex.reps, note: ex.note || "" }); }}
-                                  style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 11.5 }}>edytuj</button>
-                                <button onClick={() => deleteExercise(day.id, ex.id)} style={{ background: "none", border: "none", color: "#B3502E", cursor: "pointer", fontSize: 15 }}>×</button>
-                              </div>
+                            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                              <button onClick={() => { setEditingId(ex.id); setEditDraft({ name: ex.name, sets: ex.sets, reps: ex.reps, note: ex.note || "" }); }}
+                                style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 11.5 }}>edytuj</button>
+                              <button onClick={() => deleteExercise(day.id, ex.id)} style={{ background: "none", border: "none", color: "#B3502E", cursor: "pointer", fontSize: 15 }}>×</button>
                             </div>
                           </>
                         )}
@@ -386,6 +425,19 @@ export default function App() {
               <button onClick={() => setLogOpen(false)} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid #2B3038", background: "none", color: "#9A9EA6", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>Anuluj</button>
               <button onClick={submitLog} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.brass, color: "#1A1500", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>Zapisz</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Icon zoom modal */}
+      {zoomedIcon && (
+        <div onClick={() => setZoomedIcon(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 24 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#1D2025", border: "1px solid #2B3038", borderRadius: 16, padding: 24, maxWidth: 320, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 180, height: 180, borderRadius: 16, background: withAlpha(zoomedIcon.color, 0.14), border: `1px solid ${withAlpha(zoomedIcon.color, 0.35)}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon type={zoomedIcon.type} color={zoomedIcon.color} size={140} />
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 600, textAlign: "center" }}>{zoomedIcon.name}</div>
+            <button onClick={() => setZoomedIcon(null)} style={{ marginTop: 4, padding: "10px 24px", borderRadius: 10, border: "none", background: COLORS.brass, color: "#1A1500", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Zamknij</button>
           </div>
         </div>
       )}

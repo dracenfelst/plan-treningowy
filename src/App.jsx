@@ -1,0 +1,394 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Icon, iconTypeFor, dayIconType, COLORS } from "./icons.jsx";
+import { uid, defaultDays } from "./defaultData.js";
+import Calendar, { groupHistoryByDate } from "./Calendar.jsx";
+
+const STORAGE_KEY = "plan-treningowy-state-v1";
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { days: parsed.days || defaultDays(), history: parsed.history || [], checked: parsed.checked || {} };
+    }
+  } catch (e) {}
+  return { days: defaultDays(), history: [], checked: {} };
+}
+
+function computeStreak(history) {
+  const dates = new Set(history.map((h) => h.date.slice(0, 10)));
+  if (dates.size === 0) return 0;
+  let d = new Date();
+  const todayStr = d.toISOString().slice(0, 10);
+  if (!dates.has(todayStr)) d.setDate(d.getDate() - 1);
+  let streak = 0;
+  while (dates.has(d.toISOString().slice(0, 10))) {
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+const ACTIVITY_TYPES = ["Bieganie", "Rower", "Rozciąganie", "Siłowo (poza planem)", "Inne"];
+
+export default function App() {
+  const initial = useRef(loadState()).current;
+  const [days, setDays] = useState(initial.days);
+  const [history, setHistory] = useState(initial.history);
+  const [checked, setChecked] = useState(initial.checked);
+
+  const [openDay, setOpenDay] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [addingTo, setAddingTo] = useState(null);
+  const [newEx, setNewEx] = useState({ name: "", sets: "3", reps: "10" });
+  const [editingDayId, setEditingDayId] = useState(null);
+  const [dayTitleDraft, setDayTitleDraft] = useState("");
+  const [showCaution, setShowCaution] = useState(true);
+  const [logOpen, setLogOpen] = useState(false);
+  const [logDraft, setLogDraft] = useState({ type: "Bieganie", duration: "30", note: "", date: new Date().toISOString().slice(0, 10) });
+  const [historyView, setHistoryView] = useState("calendar");
+  const [calMonth, setCalMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ days, history, checked })); } catch (e) {}
+  }, [days, history, checked]);
+
+  const streak = computeStreak(history);
+
+  const toggleCheck = (dayId, exId) => {
+    setChecked((prev) => {
+      const set = new Set(prev[dayId] || []);
+      set.has(exId) ? set.delete(exId) : set.add(exId);
+      return { ...prev, [dayId]: Array.from(set) };
+    });
+  };
+
+  const finishSession = (day) => {
+    const doneCount = (checked[day.id] || []).length;
+    setHistory((h) => [
+      { id: uid(), type: "plan", dayTitle: day.title, date: new Date().toISOString(), exercisesDone: doneCount, exercisesTotal: day.exercises.length },
+      ...h,
+    ].slice(0, 60));
+    setChecked((prev) => ({ ...prev, [day.id]: [] }));
+  };
+
+  const updateExercise = (dayId, exId, patch) => {
+    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: d.exercises.map((e) => e.id === exId ? { ...e, ...patch } : e) }));
+  };
+  const deleteExercise = (dayId, exId) => {
+    if (!confirm("Usunąć to ćwiczenie?")) return;
+    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: d.exercises.filter((e) => e.id !== exId) }));
+  };
+  const addExercise = (dayId) => {
+    if (!newEx.name.trim()) return;
+    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: [...d.exercises, { id: uid(), name: newEx.name.trim(), sets: Number(newEx.sets) || 1, reps: newEx.reps || "-", caution: false, note: "" }] }));
+    setNewEx({ name: "", sets: "3", reps: "10" });
+    setAddingTo(null);
+  };
+  const toggleCaution = (dayId, exId) => {
+    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, exercises: d.exercises.map((e) => e.id === exId ? { ...e, caution: !e.caution } : e) }));
+  };
+  const saveDayTitle = (dayId) => {
+    setDays((ds) => ds.map((d) => d.id !== dayId ? d : { ...d, title: dayTitleDraft.trim() || d.title }));
+    setEditingDayId(null);
+  };
+  const deleteDay = (dayId) => {
+    if (!confirm("Usunąć cały ten dzień treningowy?")) return;
+    setDays((ds) => ds.filter((d) => d.id !== dayId));
+  };
+  const addDay = () => {
+    const nd = { id: uid(), title: "Nowy dzień", tag: "WŁASNY", exercises: [] };
+    setDays((ds) => [...ds, nd]);
+    setEditingDayId(nd.id);
+    setDayTitleDraft(nd.title);
+    setOpenDay(nd.id);
+  };
+  const resetPlan = () => {
+    if (!confirm("Przywrócić domyślny plan? Twoje zmiany w ćwiczeniach zostaną nadpisane (historia zostanie).")) return;
+    setDays(defaultDays());
+    setChecked({});
+  };
+  const submitLog = () => {
+    setHistory((h) => [
+      { id: uid(), type: "activity", activityType: logDraft.type, duration: logDraft.duration, note: logDraft.note.trim(), date: new Date(logDraft.date + "T12:00:00").toISOString() },
+      ...h,
+    ].slice(0, 60));
+    setLogOpen(false);
+  };
+  const deleteHistory = (id) => {
+    if (!confirm("Usunąć ten wpis z historii?")) return;
+    setHistory((h) => h.filter((x) => x.id !== id));
+  };
+  const openLog = (dateStr) => {
+    setLogDraft({ type: "Bieganie", duration: "30", note: "", date: dateStr || new Date().toISOString().slice(0, 10) });
+    setLogOpen(true);
+  };
+
+  return (
+    <div style={{ background: "#14161A", minHeight: "100vh", fontFamily: "Inter, sans-serif", color: "#EDEAE3", paddingBottom: 48 }}>
+      <style>{`
+        @keyframes spinCrank { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes bandPulse { 0%,100% { transform: scaleX(1); } 50% { transform: scaleX(0.7); } }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ padding: "28px 20px 18px", borderBottom: "1px solid #2B3038" }}>
+        <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 700, fontSize: 26, letterSpacing: 1, textTransform: "uppercase" }}>
+          Plan <span style={{ color: COLORS.brass }}>5 / tydzień</span>
+        </div>
+        <div style={{ color: "#8A8E96", fontSize: 13, marginTop: 4 }}>Drążek · gumy · rower · bieganie — siła i sylwetka</div>
+      </div>
+
+      {/* Log activity button */}
+      <div style={{ margin: "16px 20px 0" }}>
+        <button onClick={() => openLog()}
+          style={{ width: "100%", background: COLORS.brass, color: "#1A1500", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer" }}>
+          + Zaloguj aktywność
+        </button>
+      </div>
+
+      {/* Streak */}
+      {streak > 0 && (
+        <div style={{ margin: "12px 20px 0", background: "#1D2025", border: "1px solid #2B3038", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 22, color: COLORS.brass }}>{streak} {streak === 1 ? "dzień" : "dni"}</div>
+            <div style={{ fontSize: 11.5, color: "#8A8E96", textTransform: "uppercase", letterSpacing: 0.5 }}>seria z rzędu</div>
+          </div>
+          <div style={{ fontSize: 22 }}>🔥</div>
+        </div>
+      )}
+
+      {/* Caution banner */}
+      {showCaution && (
+        <div style={{ margin: "16px 20px 0", background: "#2A211A", border: "1px solid #8A7220", borderRadius: 10, padding: "12px 14px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <div style={{ color: COLORS.brass, fontSize: 16, lineHeight: 1 }}>⚠</div>
+          <div style={{ fontSize: 12.5, color: "#9A9EA6", lineHeight: 1.5, flex: 1 }}>
+            Ćwiczenia oznaczone <b style={{ color: COLORS.brass }}>⚠</b> mocniej angażują pachwinę/biodra — przy bólu przerwij i zamień na lżejszy wariant. Historia przepukliny to sygnał, żeby plan skonsultować z fizjoterapeutą, zwłaszcza przy zwiększaniu obciążeń.
+          </div>
+          <button onClick={() => setShowCaution(false)} style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+      )}
+
+      {/* Days */}
+      <div style={{ padding: "18px 20px 0", display: "flex", flexDirection: "column", gap: 12 }}>
+        {days.map((day, idx) => {
+          const isOpen = openDay === day.id;
+          const doneN = (checked[day.id] || []).length;
+          const total = day.exercises.length;
+          return (
+            <div key={day.id} style={{ background: "#1D2025", border: "1px solid #2B3038", borderRadius: 14, overflow: "hidden" }}>
+              <div onClick={() => setOpenDay(isOpen ? null : day.id)} style={{ padding: 16, cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 13, color: COLORS.brass, width: 20, flexShrink: 0 }}>{String(idx + 1).padStart(2, "0")}</div>
+                <div style={{ width: 46, height: 46, borderRadius: 12, background: "#2B3038", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon type={dayIconType(day.title)} color={COLORS.brass} size={26} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }} onClick={(e) => e.stopPropagation()}>
+                  {editingDayId === day.id ? (
+                    <input autoFocus value={dayTitleDraft} onChange={(e) => setDayTitleDraft(e.target.value)}
+                      style={{ background: "#2B3038", border: "none", borderRadius: 6, padding: "4px 6px", color: "#EDEAE3", fontSize: 14, width: "100%" }} />
+                  ) : (
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{day.title}</div>
+                  )}
+                  <div style={{ fontSize: 11.5, color: "#8A8E96", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    {day.tag} · {total} ćwiczeń {doneN > 0 ? `· ${doneN}/${total} zaznaczone` : ""}
+                  </div>
+                </div>
+                {editingDayId === day.id ? (
+                  <button onClick={(e) => { e.stopPropagation(); saveDayTitle(day.id); }} style={{ background: "none", border: "none", color: COLORS.brass, cursor: "pointer", fontSize: 12 }}>OK</button>
+                ) : (
+                  <button onClick={(e) => { e.stopPropagation(); setEditingDayId(day.id); setDayTitleDraft(day.title); }} style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 13 }}>✎</button>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); deleteDay(day.id); }} style={{ background: "none", border: "none", color: "#B3502E", cursor: "pointer", fontSize: 16 }}>×</button>
+                <div style={{ color: "#8A8E96", fontSize: 18, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }}>⌄</div>
+              </div>
+
+              {isOpen && (
+                <div style={{ padding: "0 16px 16px" }}>
+                  {day.exercises.map((ex) => {
+                    const isEditing = editingId === ex.id;
+                    const isDone = (checked[day.id] || []).includes(ex.id);
+                    return (
+                      <div key={ex.id} style={{ borderTop: "1px solid #2B3038", padding: "12px 0", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                        <button onClick={() => toggleCheck(day.id, ex.id)}
+                          style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, cursor: "pointer", marginTop: 9, border: `1.5px solid ${isDone ? "#5C8A5C" : "#2B3038"}`, background: isDone ? "#5C8A5C" : "transparent", color: "#EDEAE3", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {isDone ? "✓" : ""}
+                        </button>
+                        {!isEditing && (
+                          <div style={{ width: 40, height: 40, borderRadius: 10, background: "#2B3038", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: isDone ? 0.45 : 1 }}>
+                            <Icon type={iconTypeFor(ex.name)} color={COLORS.chalk} size={22} />
+                          </div>
+                        )}
+                        {isEditing ? (
+                          <div style={{ flex: 1, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
+                              style={{ flex: "1 1 140px", background: "#2B3038", border: "none", borderRadius: 6, padding: "6px 8px", color: "#EDEAE3", fontSize: 13 }} />
+                            <input value={editDraft.sets} onChange={(e) => setEditDraft({ ...editDraft, sets: e.target.value })}
+                              style={{ width: 40, background: "#2B3038", border: "none", borderRadius: 6, padding: "6px 8px", color: "#EDEAE3", fontSize: 13 }} />
+                            <input value={editDraft.reps} onChange={(e) => setEditDraft({ ...editDraft, reps: e.target.value })}
+                              style={{ width: 64, background: "#2B3038", border: "none", borderRadius: 6, padding: "6px 8px", color: "#EDEAE3", fontSize: 13 }} />
+                            <input value={editDraft.note} placeholder="wskazówka techniki" onChange={(e) => setEditDraft({ ...editDraft, note: e.target.value })}
+                              style={{ flex: "1 1 100%", background: "#2B3038", border: "none", borderRadius: 6, padding: "6px 8px", color: "#EDEAE3", fontSize: 12.5 }} />
+                            <button onClick={() => { updateExercise(day.id, ex.id, editDraft); setEditingId(null); }}
+                              style={{ background: COLORS.brass, border: "none", borderRadius: 6, padding: "6px 10px", color: "#1A1500", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>OK</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13.5, color: isDone ? "#8A8E96" : "#EDEAE3", textDecoration: isDone ? "line-through" : "none" }}>
+                                {ex.name} {ex.caution && <span style={{ color: COLORS.brass }}>⚠</span>}
+                              </div>
+                              <div style={{ fontSize: 11.5, color: "#8A8E96", marginTop: 1 }}>{ex.sets} × {ex.reps}</div>
+                              {ex.note && <div style={{ fontSize: 11, color: COLORS.brass, marginTop: 3, opacity: isDone ? 0.5 : 0.9 }}>{ex.note}</div>}
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                              <button onClick={() => toggleCaution(day.id, ex.id)} style={{ background: "none", border: "none", color: ex.caution ? COLORS.brass : "#2B3038", cursor: "pointer", fontSize: 14 }}>⚠</button>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button onClick={() => { setEditingId(ex.id); setEditDraft({ name: ex.name, sets: ex.sets, reps: ex.reps, note: ex.note || "" }); }}
+                                  style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 11.5 }}>edytuj</button>
+                                <button onClick={() => deleteExercise(day.id, ex.id)} style={{ background: "none", border: "none", color: "#B3502E", cursor: "pointer", fontSize: 15 }}>×</button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {addingTo === day.id ? (
+                    <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <input placeholder="nazwa ćwiczenia" value={newEx.name} onChange={(e) => setNewEx({ ...newEx, name: e.target.value })}
+                        style={{ flex: "1 1 140px", background: "#2B3038", border: "none", borderRadius: 6, padding: "6px 8px", color: "#EDEAE3", fontSize: 13 }} />
+                      <input placeholder="serie" value={newEx.sets} onChange={(e) => setNewEx({ ...newEx, sets: e.target.value })}
+                        style={{ width: 50, background: "#2B3038", border: "none", borderRadius: 6, padding: "6px 8px", color: "#EDEAE3", fontSize: 13 }} />
+                      <input placeholder="powt." value={newEx.reps} onChange={(e) => setNewEx({ ...newEx, reps: e.target.value })}
+                        style={{ width: 60, background: "#2B3038", border: "none", borderRadius: 6, padding: "6px 8px", color: "#EDEAE3", fontSize: 13 }} />
+                      <button onClick={() => addExercise(day.id)} style={{ background: COLORS.brass, border: "none", borderRadius: 6, padding: "6px 12px", color: "#1A1500", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Dodaj</button>
+                      <button onClick={() => setAddingTo(null)} style={{ background: "none", border: "1px solid #2B3038", borderRadius: 6, padding: "6px 12px", color: "#8A8E96", fontSize: 12, cursor: "pointer" }}>Anuluj</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setAddingTo(day.id)} style={{ marginTop: 10, background: "none", border: "1px dashed #2B3038", borderRadius: 8, padding: "8px 12px", color: "#8A8E96", fontSize: 12.5, cursor: "pointer", width: "100%", textAlign: "left" }}>+ dodaj ćwiczenie</button>
+                  )}
+
+                  <button onClick={() => finishSession(day)} style={{ marginTop: 14, width: "100%", background: "#5C8A5C", border: "none", borderRadius: 10, padding: "11px 0", color: "#0F1A0F", fontWeight: 700, fontSize: 13.5, letterSpacing: 0.5, cursor: "pointer", textTransform: "uppercase" }}>
+                    Zakończ trening
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <button onClick={addDay} style={{ background: "none", border: "1px dashed #2B3038", borderRadius: 12, padding: 14, color: "#8A8E96", fontSize: 13, cursor: "pointer", textAlign: "center" }}>
+          + dodaj nowy dzień
+        </button>
+      </div>
+
+      {/* History */}
+      <div style={{ padding: "22px 20px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ fontFamily: "Oswald, sans-serif", fontSize: 15, letterSpacing: 0.5, textTransform: "uppercase", color: "#9A9EA6" }}>Historia</div>
+          <div style={{ display: "flex", gap: 4, background: "#1D2025", border: "1px solid #2B3038", borderRadius: 8, padding: 2 }}>
+            <button onClick={() => setHistoryView("calendar")} style={{ background: historyView === "calendar" ? "#2B3038" : "none", border: "none", color: historyView === "calendar" ? "#EDEAE3" : "#8A8E96", fontSize: 11.5, padding: "5px 10px", borderRadius: 6, cursor: "pointer" }}>Kalendarz</button>
+            <button onClick={() => setHistoryView("list")} style={{ background: historyView === "list" ? "#2B3038" : "none", border: "none", color: historyView === "list" ? "#EDEAE3" : "#8A8E96", fontSize: 11.5, padding: "5px 10px", borderRadius: 6, cursor: "pointer" }}>Lista</button>
+          </div>
+        </div>
+
+        {historyView === "calendar" ? (
+          <>
+            <Calendar month={calMonth} onMonthChange={setCalMonth} history={history} selectedDate={selectedDate} onSelectDate={(d) => setSelectedDate(d === selectedDate ? null : d)} />
+            {selectedDate && (() => {
+              const byDate = groupHistoryByDate(history);
+              const entries = byDate[selectedDate] || [];
+              const label = new Date(selectedDate + "T12:00:00").toLocaleDateString("pl-PL", { weekday: "long", day: "2-digit", month: "long" });
+              return (
+                <div style={{ marginTop: 10, background: "#1D2025", border: "1px solid #2B3038", borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: entries.length ? 8 : 10, textTransform: "capitalize" }}>{label}</div>
+                  {entries.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: "#8A8E96", marginBottom: 10 }}>Brak wpisów tego dnia.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                      {entries.map((h) => (
+                        <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "#9A9EA6", background: "#14161A", borderRadius: 8, padding: "8px 12px", border: "1px solid #2B3038" }}>
+                          <span>
+                            <span style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 6px", borderRadius: 4, marginRight: 6, background: h.type === "activity" ? "rgba(201,162,39,0.2)" : "rgba(92,138,92,0.2)", color: h.type === "activity" ? COLORS.brass : "#5C8A5C" }}>
+                              {h.type === "activity" ? "aktywność" : "plan"}
+                            </span>
+                            {h.type === "activity" ? `${h.activityType}${h.note ? " — " + h.note : ""}` : h.dayTitle}
+                          </span>
+                          <span style={{ display: "flex", alignItems: "center" }}>
+                            <span style={{ color: "#8A8E96" }}>{h.type === "activity" ? (h.duration ? `${h.duration} min` : "") : `${h.exercisesDone}/${h.exercisesTotal}`}</span>
+                            <button onClick={() => deleteHistory(h.id)} style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 13, marginLeft: 6 }}>×</button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button onClick={() => openLog(selectedDate)} style={{ width: "100%", background: "none", border: "1px dashed #2B3038", borderRadius: 8, padding: "8px 12px", color: "#8A8E96", fontSize: 12, cursor: "pointer" }}>+ dodaj wpis dla tego dnia</button>
+                </div>
+              );
+            })()}
+          </>
+        ) : (
+          history.length === 0 ? (
+            <div style={{ color: "#8A8E96", fontSize: 13 }}>Brak wpisów — zakończ trening albo zaloguj aktywność.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {history.slice(0, 30).map((h) => {
+                const dateStr = new Date(h.date).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" });
+                return (
+                  <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "#9A9EA6", background: "#1D2025", borderRadius: 8, padding: "8px 12px", border: "1px solid #2B3038" }}>
+                    <span>
+                      <span style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 6px", borderRadius: 4, marginRight: 6, background: h.type === "activity" ? "rgba(201,162,39,0.2)" : "rgba(92,138,92,0.2)", color: h.type === "activity" ? COLORS.brass : "#5C8A5C" }}>
+                        {h.type === "activity" ? "aktywność" : "plan"}
+                      </span>
+                      {h.type === "activity" ? `${h.activityType}${h.note ? " — " + h.note : ""}` : h.dayTitle}
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center" }}>
+                      <span style={{ color: "#8A8E96" }}>{dateStr}{h.type === "activity" ? (h.duration ? ` · ${h.duration} min` : "") : ` · ${h.exercisesDone}/${h.exercisesTotal}`}</span>
+                      <button onClick={() => deleteHistory(h.id)} style={{ background: "none", border: "none", color: "#8A8E96", cursor: "pointer", fontSize: 13, marginLeft: 6 }}>×</button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+      </div>
+
+      <div style={{ padding: "24px 20px 0", display: "flex", justifyContent: "center" }}>
+        <button onClick={resetPlan} style={{ background: "none", border: "none", color: "#8A8E96", fontSize: 11.5, cursor: "pointer", textDecoration: "underline" }}>przywróć domyślny plan</button>
+      </div>
+
+
+      {/* Log activity modal */}
+      {logOpen && (
+        <div onClick={() => setLogOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#1D2025", border: "1px solid #2B3038", borderRadius: "16px 16px 0 0", padding: 20, width: "100%", maxWidth: 480 }}>
+            <h3 style={{ fontFamily: "Oswald, sans-serif", textTransform: "uppercase", fontSize: 16, margin: "0 0 14px" }}>Zaloguj aktywność</h3>
+            <label style={{ display: "block", fontSize: 11.5, color: "#8A8E96", margin: "10px 0 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>Rodzaj</label>
+            <select value={logDraft.type} onChange={(e) => setLogDraft({ ...logDraft, type: e.target.value })}
+              style={{ width: "100%", background: "#2B3038", border: "none", borderRadius: 8, padding: 10, color: "#EDEAE3", fontSize: 14 }}>
+              {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <label style={{ display: "block", fontSize: 11.5, color: "#8A8E96", margin: "10px 0 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>Czas trwania (min)</label>
+            <input type="number" value={logDraft.duration} onChange={(e) => setLogDraft({ ...logDraft, duration: e.target.value })}
+              style={{ width: "100%", background: "#2B3038", border: "none", borderRadius: 8, padding: 10, color: "#EDEAE3", fontSize: 14 }} />
+            <label style={{ display: "block", fontSize: 11.5, color: "#8A8E96", margin: "10px 0 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>Notatka (opcjonalnie)</label>
+            <textarea rows={2} placeholder="np. zamiast dzisiejszego planu" value={logDraft.note} onChange={(e) => setLogDraft({ ...logDraft, note: e.target.value })}
+              style={{ width: "100%", background: "#2B3038", border: "none", borderRadius: 8, padding: 10, color: "#EDEAE3", fontSize: 14, fontFamily: "inherit" }} />
+            <label style={{ display: "block", fontSize: 11.5, color: "#8A8E96", margin: "10px 0 4px", textTransform: "uppercase", letterSpacing: 0.5 }}>Data</label>
+            <input type="date" value={logDraft.date} onChange={(e) => setLogDraft({ ...logDraft, date: e.target.value })}
+              style={{ width: "100%", background: "#2B3038", border: "none", borderRadius: 8, padding: 10, color: "#EDEAE3", fontSize: 14 }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+              <button onClick={() => setLogOpen(false)} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid #2B3038", background: "none", color: "#9A9EA6", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>Anuluj</button>
+              <button onClick={submitLog} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.brass, color: "#1A1500", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>Zapisz</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

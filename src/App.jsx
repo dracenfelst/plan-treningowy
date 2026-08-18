@@ -58,6 +58,7 @@ export default function App() {
   const [calMonth, setCalMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(null);
   const [zoomedIcon, setZoomedIcon] = useState(null);
+  const [tab, setTab] = useState("plan");
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ days, history, checked })); } catch (e) {}
@@ -166,7 +167,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ background: "#14161A", minHeight: "100vh", fontFamily: "Inter, sans-serif", color: "#EDEAE3", paddingBottom: 48 }}>
+    <div style={{ background: "#14161A", minHeight: "100vh", fontFamily: "Inter, sans-serif", color: "#EDEAE3", paddingBottom: 88 }}>
       <style>{`
         @keyframes spinCrank { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes bandPulse { 0%,100% { transform: scaleX(1); } 50% { transform: scaleX(0.7); } }
@@ -190,13 +191,19 @@ export default function App() {
         </div>
       </div>
 
-      {/* Log activity + timer */}
-      <div style={{ margin: "16px 20px 0", display: "flex", gap: 8 }}>
+      {/* Timer - always visible regardless of tab */}
+      <div style={{ margin: "16px 20px 0" }}>
+        <Timer />
+      </div>
+
+      {tab === "plan" && (
+      <>
+      {/* Log activity */}
+      <div style={{ margin: "12px 20px 0" }}>
         <button onClick={() => openLog()}
-          style={{ flex: 1, background: COLORS.brass, color: "#1A1500", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer" }}>
+          style={{ width: "100%", background: COLORS.brass, color: "#1A1500", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: 0.5, cursor: "pointer" }}>
           + Zaloguj aktywność
         </button>
-        <Timer />
       </div>
 
       {/* Streak */}
@@ -325,6 +332,14 @@ export default function App() {
         </button>
       </div>
 
+      <div style={{ padding: "24px 20px 0", display: "flex", justifyContent: "center" }}>
+        <button onClick={resetPlan} style={{ background: "none", border: "none", color: "#8A8E96", fontSize: 11.5, cursor: "pointer", textDecoration: "underline" }}>przywróć domyślny plan</button>
+      </div>
+      </>
+      )}
+
+      {tab === "historia" && (
+      <>
       {/* History */}
       <div style={{ padding: "22px 20px 0" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -396,11 +411,22 @@ export default function App() {
           )
         )}
       </div>
+      </>
+      )}
 
-      <div style={{ padding: "24px 20px 0", display: "flex", justifyContent: "center" }}>
-        <button onClick={resetPlan} style={{ background: "none", border: "none", color: "#8A8E96", fontSize: 11.5, cursor: "pointer", textDecoration: "underline" }}>przywróć domyślny plan</button>
+      {/* Bottom tab bar */}
+      <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 45, display: "flex", background: "#1A1C21", borderTop: "1px solid #2B3038", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        <button onClick={() => setTab("plan")}
+          style={{ flex: 1, background: "none", border: "none", padding: "12px 0 10px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+          <span style={{ fontSize: 18, opacity: tab === "plan" ? 1 : 0.55 }}>🏋️</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: tab === "plan" ? COLORS.brass : "#8A8E96", textTransform: "uppercase", letterSpacing: 0.5 }}>Plan</span>
+        </button>
+        <button onClick={() => setTab("historia")}
+          style={{ flex: 1, background: "none", border: "none", padding: "12px 0 10px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+          <span style={{ fontSize: 18, opacity: tab === "historia" ? 1 : 0.55 }}>📅</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: tab === "historia" ? COLORS.brass : "#8A8E96", textTransform: "uppercase", letterSpacing: 0.5 }}>Historia</span>
+        </button>
       </div>
-
 
       {/* Log activity modal */}
       {logOpen && (

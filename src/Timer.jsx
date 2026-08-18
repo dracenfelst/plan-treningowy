@@ -4,12 +4,11 @@ import { COLORS, withAlpha } from "./icons.jsx";
 const TIMER_KEY = "plan-treningowy-timer-v1";
 const PRESETS = [
   { label: "Rozgrzewka 30 min", seconds: 30 * 60 },
+  { label: "Przerwa 10s", seconds: 10 },
+  { label: "Przerwa 20s", seconds: 20 },
   { label: "Przerwa 30s", seconds: 30 },
-  { label: "Przerwa 45s", seconds: 45 },
   { label: "Przerwa 60s", seconds: 60 },
-  { label: "Przerwa 90s", seconds: 90 },
   { label: "Przerwa 120s", seconds: 120 },
-  { label: "Przerwa 180s", seconds: 180 },
 ];
 
 function loadTimer() {
@@ -46,6 +45,25 @@ function beep() {
       t += 0.3;
     }
     setTimeout(() => ctx.close(), 1200);
+  } catch (e) {}
+}
+
+function beepStart() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 660;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.17);
+    setTimeout(() => ctx.close(), 400);
   } catch (e) {}
 }
 
@@ -117,6 +135,7 @@ export default function Timer() {
     setPausedRemaining(null);
     setRunning(true);
     acquireWakeLock();
+    beepStart();
   };
   const pause = () => {
     setPausedRemaining(remaining);
@@ -148,13 +167,13 @@ export default function Timer() {
   return (
     <>
       <button onClick={() => setOpen(true)}
-        style={{ flex: "0 0 auto", background: isActive ? "#2B3038" : "none", border: `1px solid ${isActive ? COLORS.brass : "#2B3038"}`, color: isActive ? COLORS.brass : "#9A9EA6", borderRadius: 10, padding: "12px 14px", fontWeight: 700, fontSize: 13.5, cursor: "pointer", whiteSpace: "nowrap" }}>
-        ⏱ {isActive ? fmt(remaining) : "Stoper"}
+        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: isActive ? withAlpha(COLORS.brass, 0.14) : "#1D2025", border: `1.5px solid ${isActive ? COLORS.brass : "#2B3038"}`, color: isActive ? COLORS.brass : "#EDEAE3", borderRadius: 10, padding: "14px 0", fontWeight: 700, fontSize: 16, cursor: "pointer" }}>
+        <span style={{ fontSize: 19 }}>⏱</span> {isActive ? fmt(remaining) : "Stoper"}
       </button>
 
       {isActive && !open && (
         <div onClick={() => setOpen(true)}
-          style={{ position: "fixed", bottom: 18, left: "50%", transform: "translateX(-50%)", zIndex: 40, background: "#1D2025", border: `1px solid ${COLORS.brass}`, borderRadius: 999, padding: "10px 20px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.4)" }}>
+          style={{ position: "fixed", bottom: "calc(74px + env(safe-area-inset-bottom, 0px))", left: "50%", transform: "translateX(-50%)", zIndex: 40, background: "#1D2025", border: `1px solid ${COLORS.brass}`, borderRadius: 999, padding: "10px 20px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.4)" }}>
           <span style={{ fontFamily: "Oswald, sans-serif", fontSize: 18, color: COLORS.brass }}>{fmt(remaining)}</span>
           {!running && <span style={{ fontSize: 11, color: "#8A8E96", textTransform: "uppercase" }}>pauza</span>}
         </div>

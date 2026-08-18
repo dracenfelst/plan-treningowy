@@ -20,9 +20,13 @@
         window.addEventListener("load", () => {
           navigator.serviceWorker.register("sw.js").catch(() => {});
         });
+        // Skip the forced reload while Supabase is still parsing an auth
+        // token out of the URL hash (magic link / OAuth redirect) - reloading
+        // mid-way loses the in-progress sign-in.
+        var hasAuthToken = /access_token|refresh_token|type=(signup|magiclink|recovery)/.test(window.location.hash);
         let reloaded = false;
         navigator.serviceWorker.addEventListener("controllerchange", () => {
-          if (reloaded) return;
+          if (reloaded || hasAuthToken) return;
           reloaded = true;
           window.location.reload();
         });

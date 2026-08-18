@@ -15,14 +15,18 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     if (!supabaseEnabled) return;
+    const failSafe = setTimeout(() => setLoading(false), 6000);
     supabase.auth.getSession().then(({ data }) => {
+      clearTimeout(failSafe);
       setSession(data.session);
       setLoading(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      clearTimeout(failSafe);
       setSession(sess);
+      setLoading(false);
     });
-    return () => sub.subscription.unsubscribe();
+    return () => { clearTimeout(failSafe); sub.subscription.unsubscribe(); };
   }, []);
 
   if (!supabaseEnabled) {
@@ -30,7 +34,11 @@ export default function AuthGate({ children }) {
   }
 
   if (loading) {
-    return <div style={{ minHeight: "100vh", background: "#14161A" }} />;
+    return (
+      <div style={{ minHeight: "100vh", background: "#14161A", color: "#8A8E96", fontFamily: "Inter, sans-serif", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        Logowanie…
+      </div>
+    );
   }
 
   if (!session) {

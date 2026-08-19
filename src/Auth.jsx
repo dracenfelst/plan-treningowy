@@ -68,7 +68,7 @@ export default function AuthGate({ children }) {
       <div style={{ minHeight: "100vh", background: "#14161A", color: "#EDEAE3", fontFamily: "Inter, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
         <div style={{ maxWidth: 340, width: "100%" }}>
           <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 700, fontSize: 24, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>
-            Napakowany <span style={{ color: COLORS.brass }}>Tata</span>
+            Przypakowany <span style={{ color: COLORS.brass }}>Tata</span>
           </div>
           {sent ? (
             <div style={{ marginTop: 20, background: "#1D2025", border: "1px solid #2B3038", borderRadius: 12, padding: 20 }}>

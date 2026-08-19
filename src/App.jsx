@@ -178,7 +178,7 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
           <div>
             <div style={{ fontFamily: "Oswald, sans-serif", fontWeight: 700, fontSize: 26, letterSpacing: 1, textTransform: "uppercase" }}>
-              Napakowany <span style={{ color: COLORS.brass }}>Tata</span>
+              Przypakowany <span style={{ color: COLORS.brass }}>Tata</span>
             </div>
             <div style={{ color: "#8A8E96", fontSize: 13, marginTop: 4 }}>Plan 5 / tydzień · drążek · gumy · rower · bieganie</div>
           </div>

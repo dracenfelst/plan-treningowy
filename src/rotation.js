@@ -45,7 +45,10 @@ export function applyRotation(days) {
         changed = true;
       }
       const variant = pool[entry.index];
-      return { ...ex, name: variant.name, sets: variant.sets, reps: variant.reps, note: variant.note };
+      const next = { ...ex, name: variant.name, sets: variant.sets, reps: variant.reps, note: variant.note };
+      if (variant.iconType) next.iconType = variant.iconType; else delete next.iconType;
+      if (variant.equipment) next.equipment = variant.equipment; else delete next.equipment;
+      return next;
     }),
   }));
   if (changed) saveRotationState(state);

@@ -25,6 +25,13 @@ export function muscleGroupFor(type) {
   return GROUP_BY_TYPE[type] || "other";
 }
 
+// Authored exercises (library/pools) carry an explicit iconType so growing the
+// library never adds more risk to the name-sniffing regex chain below. Only
+// free-typed, ad-hoc exercises (no iconType) fall back to iconTypeFor(name).
+export function resolveIconType(ex) {
+  return ex.iconType || iconTypeFor(ex.name);
+}
+
 export function groupColorFor(type) {
   return GROUP_COLORS[muscleGroupFor(type)];
 }
@@ -333,7 +340,14 @@ function CatCowIcon({ color, size }) {
 
 const FLOOR = FLOOR_TYPES, BAR = BAR_TYPES;
 
-export function Icon({ type, size = 24, color = COLORS.chalk }) {
+function hasBandLine(type, equipment) {
+  return equipment ? equipment.includes("band") : BAND_TYPES.has(type);
+}
+function hasBandFrontLine(type, equipment) {
+  return equipment ? equipment.includes("band") : BAND_FRONT_TYPES.has(type);
+}
+
+export function Icon({ type, size = 24, color = COLORS.chalk, equipment }) {
   const pose = useSkeletonAnim(POSES_ALL[type] ? type : null);
   if (type === "bike") return <BikeIcon color={color} size={size} />;
   if (type === "catcow") return <CatCowIcon color={color} size={size} />;
@@ -342,10 +356,10 @@ export function Icon({ type, size = 24, color = COLORS.chalk }) {
     <svg width={size} height={size} viewBox="0 0 32 26" style={{ overflow: "visible" }}>
       {FLOOR.has(type) && <line x1="1" y1="22" x2="31" y2="22" stroke={COLORS.steel} strokeWidth="1.4" />}
       {BAR.has(type) && <line x1="8" y1="3" x2="24" y2="3" stroke={BAR_COLOR} strokeWidth="2.2" strokeLinecap="round" />}
-      {BAND_TYPES.has(type) && (
+      {hasBandLine(type, equipment) && pose.foot && (
         <line x1={pose.foot.x} y1="22" x2={pose.hand.x} y2={pose.hand.y} stroke={BAND_COLOR} strokeWidth="1.4" strokeDasharray="1 2.2" strokeLinecap="round" />
       )}
-      {BAND_FRONT_TYPES.has(type) && (
+      {hasBandFrontLine(type, equipment) && pose.handL && (
         <>
           <line x1="14" y1="22" x2={pose.handL.x} y2={pose.handL.y} stroke={BAND_COLOR} strokeWidth="1.4" strokeDasharray="1 2.2" strokeLinecap="round" />
           <line x1="18" y1="22" x2={pose.handR.x} y2={pose.handR.y} stroke={BAND_COLOR} strokeWidth="1.4" strokeDasharray="1 2.2" strokeLinecap="round" />
@@ -367,6 +381,7 @@ export function iconTypeFor(name) {
   if (/diament/.test(n)) return "diamondpush";
   if (/podwyższeni/.test(n)) return "pushelevated";
   if (/pompk/.test(n)) return "push";
+  if (/zwis/.test(n)) return "hang";
   if (/podciąg/.test(n)) return "pullupfront";
   if (/wiosłow/.test(n)) return "row";
   if (/rower/.test(n)) return "bike";
@@ -377,7 +392,6 @@ export function iconTypeFor(name) {
   if (/plank/.test(n)) return "plank";
   if (/hip thrust|unoszenie bioder/.test(n)) return "hip";
   if (/uginanie|curl|bicep|młotkow/.test(n)) return "curl";
-  if (/zwis/.test(n)) return "hang";
   if (/face pull/.test(n)) return "facepull";
   if (/rozpięt/.test(n)) return "chestfly";
   if (/wznos.*bocz|bocz.*wznos/.test(n)) return "lateralraise";
@@ -390,7 +404,7 @@ export function iconTypeFor(name) {
   if (/kocia|krowa/.test(n)) return "catcow";
   if (/klatk.*prog|prog.*klatk/.test(n)) return "chestopenfront";
   if (/rotacj|piersiow.*odcin/.test(n)) return "thoracic";
-  if (/tył ud|skłon/.test(n)) return "hamstring";
+  if (/tył.{0,2}ud|skłon/.test(n)) return "hamstring";
   if (/dziecka/.test(n)) return "childpose";
   return "band";
 }

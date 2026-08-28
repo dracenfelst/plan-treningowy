@@ -1,23 +1,32 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Icon, iconTypeFor, dayIconType, COLORS, groupColorFor, muscleGroupFor, withAlpha } from "./icons.jsx";
+import { Icon, iconTypeFor, resolveIconType, dayIconType, COLORS, groupColorFor, muscleGroupFor, withAlpha } from "./icons.jsx";
 import { uid, defaultDays } from "./defaultData.js";
 import Calendar, { groupHistoryByDate } from "./Calendar.jsx";
 import Timer from "./Timer.jsx";
 import { applyRotation, detachFromPool } from "./rotation.js";
 import { supabase, supabaseEnabled } from "./supabaseClient.js";
 import { useAuth } from "./Auth.jsx";
+import Onboarding from "./Onboarding.jsx";
 
 const STORAGE_KEY = "plan-treningowy-state-v1";
 
+// Anyone who already had local data before this feature existed (parsed.profile
+// is undefined, not just falsy) gets grandfathered in as already-onboarded — only
+// a truly fresh install/signup (no saved state at all) sees the onboarding wizard.
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return { days: applyRotation(parsed.days || defaultDays()), history: parsed.history || [], checked: parsed.checked || {} };
+      return {
+        days: applyRotation(parsed.days || defaultDays()),
+        history: parsed.history || [],
+        checked: parsed.checked || {},
+        profile: parsed.profile !== undefined ? parsed.profile : { onboarded: true },
+      };
     }
   } catch (e) {}
-  return { days: applyRotation(defaultDays()), history: [], checked: {} };
+  return { days: applyRotation(defaultDays()), history: [], checked: {}, profile: null };
 }
 
 function computeStreak(history) {
@@ -43,6 +52,7 @@ export default function App() {
   const [days, setDays] = useState(initial.days);
   const [history, setHistory] = useState(initial.history);
   const [checked, setChecked] = useState(initial.checked);
+  const [profile, setProfile] = useState(initial.profile);
   const [cloudReady, setCloudReady] = useState(!supabaseEnabled);
 
   const [openDay, setOpenDay] = useState(null);
@@ -61,8 +71,8 @@ export default function App() {
   const [tab, setTab] = useState("plan");
 
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ days, history, checked })); } catch (e) {}
-  }, [days, history, checked]);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ days, history, checked, profile })); } catch (e) {}
+  }, [days, history, checked, profile]);
 
   useEffect(() => {
     if (!supabaseEnabled || !session) return;
@@ -77,6 +87,9 @@ export default function App() {
         setDays(applyRotation(cloud.days || defaultDays()));
         setHistory(cloud.history || []);
         setChecked(cloud.checked || {});
+        // Same grandfather rule as loadState(): an existing cloud row predating
+        // this feature (no profile key) means "already using the app", not "new".
+        setProfile(cloud.profile !== undefined ? cloud.profile : { onboarded: true });
       }
       setCloudReady(true);
     })();
@@ -86,9 +99,15 @@ export default function App() {
   useEffect(() => {
     if (!supabaseEnabled || !session || !cloudReady) return;
     supabase.from("plans")
-      .upsert({ user_id: session.user.id, data: { days, history, checked }, updated_at: new Date().toISOString() })
+      .upsert({ user_id: session.user.id, data: { days, history, checked, profile }, updated_at: new Date().toISOString() })
       .then(({ error }) => { if (error) console.error("Nie udało się zapisać planu w chmurze:", error.message); });
-  }, [days, history, checked, cloudReady, session]);
+  }, [days, history, checked, profile, cloudReady, session]);
+
+  const completeOnboarding = (answers, generatedDays) => {
+    setDays(applyRotation(generatedDays));
+    setChecked({});
+    setProfile({ ...answers, onboarded: true, createdAt: new Date().toISOString() });
+  };
 
   const streak = computeStreak(history);
 
@@ -165,6 +184,13 @@ export default function App() {
     setLogDraft({ type: "Bieganie", duration: "30", note: "", date: dateStr || new Date().toISOString().slice(0, 10) });
     setLogOpen(true);
   };
+
+  if (supabaseEnabled && session && !cloudReady) {
+    return <div style={{ minHeight: "100vh", background: "#14161A", color: "#8A8E96", fontFamily: "Inter, sans-serif", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>Wczytywanie…</div>;
+  }
+  if (!profile || !profile.onboarded) {
+    return <Onboarding onComplete={completeOnboarding} />;
+  }
 
   return (
     <div style={{ background: "#14161A", minHeight: "100vh", fontFamily: "Inter, sans-serif", color: "#EDEAE3", paddingBottom: 88 }}>
@@ -257,7 +283,8 @@ export default function App() {
                   {day.exercises.map((ex) => {
                     const isEditing = editingId === ex.id;
                     const isDone = (checked[day.id] || []).includes(ex.id);
-                    const exColor = groupColorFor(iconTypeFor(ex.name));
+                    const exIconType = resolveIconType(ex);
+                    const exColor = groupColorFor(exIconType);
                     return (
                       <div key={ex.id} style={{ borderTop: "1px solid #2B3038", padding: "12px 0", display: "flex", alignItems: "flex-start", gap: 10 }}>
                         <button onClick={() => toggleCheck(day.id, ex.id)}
@@ -265,9 +292,9 @@ export default function App() {
                           {isDone ? "✓" : ""}
                         </button>
                         {!isEditing && (
-                          <button onClick={() => setZoomedIcon({ name: ex.name, type: iconTypeFor(ex.name), color: exColor })}
+                          <button onClick={() => setZoomedIcon({ name: ex.name, type: exIconType, color: exColor, equipment: ex.equipment })}
                             style={{ width: 46, height: 46, borderRadius: 10, background: withAlpha(exColor, isDone ? 0.08 : 0.18), border: `1px solid ${withAlpha(exColor, isDone ? 0.15 : 0.35)}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: isDone ? 0.45 : 1, cursor: "pointer", padding: 0 }}>
-                            <Icon type={iconTypeFor(ex.name)} color={exColor} size={28} />
+                            <Icon type={exIconType} color={exColor} size={28} equipment={ex.equipment} />
                           </button>
                         )}
                         {isEditing ? (
@@ -460,7 +487,7 @@ export default function App() {
         <div onClick={() => setZoomedIcon(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 24 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#1D2025", border: "1px solid #2B3038", borderRadius: 16, padding: 24, maxWidth: 320, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
             <div style={{ width: 180, height: 180, borderRadius: 16, background: withAlpha(zoomedIcon.color, 0.14), border: `1px solid ${withAlpha(zoomedIcon.color, 0.35)}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Icon type={zoomedIcon.type} color={zoomedIcon.color} size={140} />
+              <Icon type={zoomedIcon.type} color={zoomedIcon.color} size={140} equipment={zoomedIcon.equipment} />
             </div>
             <div style={{ fontSize: 15, fontWeight: 600, textAlign: "center" }}>{zoomedIcon.name}</div>
             <button onClick={() => setZoomedIcon(null)} style={{ marginTop: 4, padding: "10px 24px", borderRadius: 10, border: "none", background: COLORS.brass, color: "#1A1500", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Zamknij</button>

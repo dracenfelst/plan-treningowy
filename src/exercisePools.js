@@ -20,8 +20,8 @@ export const EXERCISE_POOLS = {
     { name: "Rozciąganie zginaczy biodra stojąc (wykrok)", sets: 1, reps: "30s / noga", note: "Długi wykrok w tył, tylna noga prosta i podparta na palcach — przesuń biodra do przodu" },
   ],
   hamstring_stretch: [
-    { name: "Skłon do przodu — tył ud", sets: 1, reps: "30-45s", note: "Stojąc, kolana lekko ugięte, opuszczaj tułów w dół, ręce swobodnie w stronę stóp" },
-    { name: "Rozciąganie tyłu uda na leżąco (unoszenie nogi)", sets: 1, reps: "30-45s / noga", note: "Leżąc na plecach, prostą nogę unieś w górę i przyciągnij do siebie za udo lub taśmą" },
+    { name: "Skłon do przodu — tył ud", sets: 1, reps: "30-45s", note: "Stojąc, kolana lekko ugięte, opuszczaj tułów w dół, ręce swobodnie w stronę stóp", iconType: "hamstring" },
+    { name: "Rozciąganie tyłu uda na leżąco (unoszenie nogi)", sets: 1, reps: "30-45s / noga", note: "Leżąc na plecach, prostą nogę unieś w górę i przyciągnij do siebie za udo lub taśmą", iconType: "hamstring" },
   ],
   child_pose: [
     { name: "Pozycja dziecka", sets: 1, reps: "45-60s", note: "Klęk, biodra opuść w stronę pięt, ręce wyciągnięte daleko przed sobą na podłodze" },
@@ -32,8 +32,8 @@ export const EXERCISE_POOLS = {
     { name: "Wznosy boczne z gumą jednorącz", sets: 3, reps: "12-15 / ręka", note: "Wolniejsze tempo, skup się na jednej stronie na raz" },
   ],
   hang_variant: [
-    { name: "Zwis na drążku (mobilność barków)", sets: 3, reps: "20-30s", note: "Rozluźnij barki, oddychaj spokojnie" },
-    { name: "Zwis aktywny z podciąganiem łopatek", sets: 3, reps: "8-10 powt.", note: "Ze zwisu ściągaj łopatki w dół, unosząc się lekko, bez zginania łokci" },
+    { name: "Zwis na drążku (mobilność barków)", sets: 3, reps: "20-30s", note: "Rozluźnij barki, oddychaj spokojnie", iconType: "hang" },
+    { name: "Zwis aktywny z podciąganiem łopatek", sets: 3, reps: "8-10 powt.", note: "Ze zwisu ściągaj łopatki w dół, unosząc się lekko, bez zginania łokci", iconType: "hang" },
   ],
   plank_variant: [
     { name: "Plank (bez dociążenia)", sets: 3, reps: "20-40s", note: "Biodra w linii ciała, brzuch ściągnięty" },

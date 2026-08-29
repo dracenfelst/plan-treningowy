@@ -31,17 +31,18 @@ function beep() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     const ctx = new Ctx();
     let t = ctx.currentTime;
+    const freqs = [880, 1046.5, 880];
     for (let i = 0; i < 3; i++) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = 880;
+      osc.type = "triangle";
+      osc.frequency.value = freqs[i];
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.8, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
       osc.connect(gain).connect(ctx.destination);
       osc.start(t);
-      osc.stop(t + 0.22);
+      osc.stop(t + 0.24);
       t += 0.3;
     }
     setTimeout(() => ctx.close(), 1200);
@@ -79,6 +80,11 @@ export default function Timer() {
   const [, forceTick] = useState(0);
   const firedRef = useRef(false);
   const wakeLockRef = useRef(null);
+  const alarmRef = useRef(null);
+
+  function stopAlarm() {
+    if (alarmRef.current) { clearInterval(alarmRef.current); alarmRef.current = null; }
+  }
 
   useEffect(() => {
     try {
@@ -106,8 +112,18 @@ export default function Timer() {
       setOpen(true);
       beep();
       if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
+      stopAlarm();
+      let repeats = 0;
+      alarmRef.current = setInterval(() => {
+        repeats++;
+        beep();
+        if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+        if (repeats >= 10) stopAlarm();
+      }, 2200);
     }
   }, [running, remaining]);
+
+  useEffect(() => stopAlarm, []);
 
   async function acquireWakeLock() {
     try {
@@ -128,6 +144,7 @@ export default function Timer() {
   }, [running]);
 
   const start = (sec) => {
+    stopAlarm();
     firedRef.current = false;
     setFinished(false);
     setDurationSec(sec);
@@ -152,6 +169,7 @@ export default function Timer() {
     acquireWakeLock();
   };
   const reset = () => {
+    stopAlarm();
     firedRef.current = false;
     setRunning(false);
     setEndAt(null);
@@ -214,7 +232,7 @@ export default function Timer() {
                 <button onClick={resume} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: "#5C8A5C", color: "#0F1A0F", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>Wznów</button>
               ) : null}
               <button onClick={reset} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid #2B3038", background: "none", color: "#9A9EA6", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>Reset</button>
-              <button onClick={() => setOpen(false)} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.brass, color: "#1A1500", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>Zamknij</button>
+              <button onClick={() => { if (finished) stopAlarm(); setOpen(false); }} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.brass, color: "#1A1500", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>Zamknij</button>
             </div>
           </div>
         </div>
